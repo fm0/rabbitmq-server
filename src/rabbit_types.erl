@@ -74,6 +74,7 @@
                   message   :: message()}).
 -type(message_properties() ::
         #message_properties{expiry :: pos_integer() | 'undefined',
+                            delivery_count :: non_neg_integer() | 0,
                             needs_confirming :: boolean()}).
 
 -type(info_key() :: atom()).
