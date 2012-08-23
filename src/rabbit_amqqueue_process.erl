@@ -718,7 +718,16 @@ drop_expired_messages(State = #q{backing_queue_state = BQS,
                                  backing_queue       = BQ }) ->
     Now = now_micros(),
     DLXFun = dead_letter_fun(expired, State),
-    ExpirePred = fun (#message_properties{expiry = Exp}) -> Now >= Exp end,
+
+    %% ExpirePred = fun (#message_properties{expiry = Exp}) -> Now >= Exp end,
+
+    %% fm delivery_count is additional expiry condition
+    max_delivery_count = 5,
+    ExpirePred = fun (#message_properties{expiry = Exp, delivery_count =Count}) ->
+                        ((Now >= Exp) or (Count > max_delivery_count)) end,
+
+
+
     {Props, BQS1} =
         case DLXFun of
             undefined ->
