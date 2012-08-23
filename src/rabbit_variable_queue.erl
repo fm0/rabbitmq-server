@@ -388,6 +388,21 @@
                                          count        = 0,
                                          end_seq_id   = Z }).
 
+%% fm: delivery_count related stuff
+%%
+-export([incr_delivery_count/1]).
+
+incr_delivery_count(State) ->
+          Prop1 = State #msg_status.msg_props,
+          CurrCount = Prop1 #message_properties.delivery_count,
+          IncProp = #message_properties{delivery_count = CurrCount +1},
+          IncrState = #msg_status{msg_props = IncProp},
+          IncrState.
+
+%% fm: end of delivery_count stuff
+
+
+
 %%----------------------------------------------------------------------------
 %% Public API
 %%----------------------------------------------------------------------------
@@ -567,7 +582,13 @@ publish_delivered(true, Msg = #basic_message { is_persistent = IsPersistent,
                                              unconfirmed      = UC }) ->
     IsPersistent1 = IsDurable andalso IsPersistent,
     MsgStatus = (msg_status(IsPersistent1, SeqId, Msg, MsgProps))
-        #msg_status { is_delivered = true },
+
+        %% #msg_status { is_delivered = true },
+%%      fm -- this is for case of msg is published to empty queue and is
+%%            delivered to the client right away
+        #msg_status { is_delivered = true, msg_props= incr_delivery_count(MsgProps) },
+
+
     {MsgStatus1, State1} = maybe_write_to_disk(false, false, MsgStatus, State),
     State2 = record_pending_ack(m(MsgStatus1), State1),
     PCount1 = PCount + one_if(IsPersistent1),
@@ -1114,8 +1135,15 @@ internal_fetch(AckRequired, MsgStatus = #msg_status {
     %% 3. If an ack is required, add something sensible to PA
     {AckTag, State1} = case AckRequired of
                            true  -> StateN = record_pending_ack(
+
+                                     %%fm  incr delivery_count
+                                               incr_delivery_count(
                                                MsgStatus #msg_status {
-                                                 is_delivered = true }, State),
+                                                is_delivered = true }), State),
+                                               
+                                    %%           MsgStatus #msg_status {
+                                    %%             is_delivered = true }, State),
+
                                     {SeqId, StateN};
                            false -> {undefined, State}
                        end,
