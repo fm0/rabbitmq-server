@@ -78,7 +78,7 @@
 
 -record(event, {type, props, timestamp}).
 
--record(message_properties, {expiry, needs_confirming = false}).
+-record(message_properties, {expiry, needs_confirming = false, delivery_count = 0}).
 
 -record(plugin, {name,          %% atom()
                  version,       %% string()
