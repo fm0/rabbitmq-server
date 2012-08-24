@@ -393,7 +393,11 @@
 -export([incr_delivery_count/1]).
 
 incr_delivery_count(State) ->
-          Prop1 = State #msg_status.msg_props,
+          Prop0 = State #msg_status.msg_props,
+          if 
+             Prop0 == undefined -> Prop1 = #message_properties{};
+             true -> Prop1 = Prop0
+          end,
           CurrCount = Prop1 #message_properties.delivery_count,
           IncProp = #message_properties{delivery_count = CurrCount +1},
           IncrState = #msg_status{msg_props = IncProp},
