@@ -722,9 +722,9 @@ drop_expired_messages(State = #q{backing_queue_state = BQS,
     %% ExpirePred = fun (#message_properties{expiry = Exp}) -> Now >= Exp end,
 
     %% fm delivery_count is additional expiry condition
-    max_delivery_count = 5,
+    Max_delivery_count = 5,
     ExpirePred = fun (#message_properties{expiry = Exp, delivery_count =Count}) ->
-                        ((Now >= Exp) or (Count > max_delivery_count)) end,
+                        ((Now >= Exp) or (Count > Max_delivery_count)) end,
 
 
 
