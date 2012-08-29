@@ -32,6 +32,10 @@
 -define(TIMEOUT, 5000).
 
 all_tests() ->
+    passed = test_ttl(),
+    passed.
+
+all_tests2() ->
     passed = gm_tests:all_tests(),
     passed = mirrored_supervisor_tests:all_tests(),
     application:set_env(rabbit, file_handles_high_watermark, 10, infinity),
@@ -1374,6 +1378,158 @@ test_statistics_receive_event1(Ch, Matcher) ->
             end
     after ?TIMEOUT -> throw(failed_to_receive_event)
     end.
+
+test_ttl_helper(Qttl) ->
+    io:format("test_ttl h0 ~n",[]),
+    application:set_env(rabbit, collect_statistics, fine),
+
+    %% list connections
+    [#listener{host = H, port = P} | _] =
+        [L || L = #listener{node = N} <- rabbit_networking:active_listeners(),
+              N =:= node()],
+	%% new connection
+    {ok, _C} = gen_tcp:connect(H, P, []),
+    timer:sleep(100),
+    ok = info_action(list_connections,
+                     rabbit_networking:connection_info_keys(), false),
+
+    io:format("test_ttl h0 ~62p~n",["_C"]),
+    %% Set up a channel and queue
+    {_Writer, Ch} = test_spawn(),
+    io:format("test_ttl h1 ~62p~n",[Ch]),
+    rabbit_channel:do(Ch, #'queue.declare'{durable = true, queue= Qttl}),
+    %% QName = receive #'queue.declare_ok'{queue = Q0} -> Q0
+    %%       after ?TIMEOUT -> throw(failed_to_receive_queue_declare_ok)
+    %%      end,
+    
+    QName = Qttl,
+    {ok, Q} = rabbit_amqqueue:lookup(rabbit_misc:r(<<"/">>, queue, QName)),
+    QPid = Q#amqqueue.pid,
+    X = rabbit_misc:r(<<"/">>, exchange, <<"">>),
+
+    rabbit_tests_event_receiver:start(self(), [node()], [channel_stats]),
+
+    %% ok = rabbit_amqqueue:basic_consume(
+    %%        Q, true, Ch, rabbit_limiter:make_token(),
+    %%        <<"ctag">>, true, undefined),
+
+    io:format("test_ttl h2 ~62p~n",[Q]),
+    %% Check stats empty
+    Event = test_statistics_receive_event(Ch, fun (_) -> true end),
+    io:format("~62p~n", [proplists:get_value(channel_queue_stats, Event)]),
+
+    ok = info_action(list_queues, rabbit_amqqueue:info_keys(), true),
+
+%%  loop(Ch) ->
+%% 	receive
+%% 		%% A delivery
+%%             {#'basic.deliver'{delivery_tag = Tag}, Content} ->
+%%               %% Do something with the message payload		
+%%              io:format("test_ttl h2.1 ~62p~n",[Content])
+%% 	end,
+
+    %%ok = rabbit_channel:do(Ch, #'basic.get'{queue = QName, no_ack = false}),
+    %% Res = rabbit_channel:do(Ch, #'basic.get_ok'{exchange = <<"">>, message_count=1, routing_key = QName}),
+    %%{exchange, message_count, routing_key, delivery_tag, redelivered} = rabbit_channel:do(Ch, #'basic.get_ok'{}),
+
+    io:format("test_ttl h3 ~62p~n",[self()]),
+    Res = rabbit_amqqueue:basic_get(Q , self(), false),
+    io:format("test_ttl h4 ~62p~n", [Res]),
+
+    rabbit_channel:shutdown(Ch),
+
+    %% close connection
+    [ConnPid] = rabbit_networking:connections(),
+    control_action(close_connection, [rabbit_misc:pid_to_string(ConnPid),
+                                           "go away"]),
+    rabbit_tests_event_receiver:stop(),
+
+    timer:sleep(5000).
+
+test_ttl_1() ->
+    io:format("test_ttl 1 ~n"),
+    %% test_ttl_2(),
+    passed.
+
+test_ttl() ->
+    io:format("test_ttl t0 ~n"),
+    application:set_env(rabbit, collect_statistics, fine),
+
+    %% ATM this just tests the queue / exchange stats in channels. That's
+    %% by far the most complex code though.
+
+    io:format("test_ttl t0-1 ~n"),
+    %% Set up a channel and queue
+    {_Writer, Ch} = test_spawn(),
+    io:format("test_ttl t1 ~n",[]),
+    %%    QName = "ttlq",
+    %% rabbit_channel:do(Ch, #'queue.declare'{durable = true,queue=QName}),
+    rabbit_channel:do(Ch, #'queue.declare'{durable = true}),
+    QName = receive #'queue.declare_ok'{queue = Q0} -> Q0
+            after ?TIMEOUT -> throw(failed_to_receive_queue_declare_ok)
+            end,
+
+    {ok, Q} = rabbit_amqqueue:lookup(rabbit_misc:r(<<"/">>, queue, QName)),
+    QPid = Q#amqqueue.pid,
+    X = rabbit_misc:r(<<"/">>, exchange, <<"">>),
+
+    io:format("test_ttl t2 ~62p~n",[QName]),
+%%  rabbit_channel:do(Ch, #'queue.bind'{
+%%		    queue = Q0,
+%%		    exchange = <<"amq.direct">>,
+%%		    routing_key = QName }),
+%%   receive #'queue.bind_ok'{} -> Q0,
+
+    rabbit_tests_event_receiver:start(self(), [node()], [channel_stats]),
+
+    io:format("test_ttl t3~n",[]),
+    %% Check stats empty
+    %% Event = test_statistics_receive_event(Ch, fun (_) -> true end),
+    io:format("test_ttl t4 ~n",[]),
+    %% [] =  proplists:get_value(channel_queue_stats, Event),
+    ok = info_action(list_queues, rabbit_amqqueue:info_keys(), true),
+
+    io:format("test_ttl t5 ~n",[]),
+    %% Publish and get a message
+    Payload = <<"ttl msg test 23">>,
+    ok = rabbit_channel:do(Ch, #'basic.publish'{exchange = <<"">>,
+                                           routing_key = QName},
+                      %%rabbit_basic:build_content(#'P_basic'{}, <<"">>)),
+                      rabbit_basic:build_content(#'P_basic'{delivery_mode =2}, Payload)),
+
+    io:format("test_ttl t6 ~n",[]),
+    %% ok = rabbit_channel:do(Ch, #'basic.get'{queue = QName, no_ack = false}),
+    %% Res = rabbit_channel:do(Ch, #'basic.get_ok'{exchange = <<"">>, message_count=1, routing_key = QName}),
+    %% io:format("~62p~n", [Res]),
+
+    %% list queues
+    ok = info_action(list_queues, rabbit_amqqueue:info_keys(), true),
+
+    io:format("test_ttl t7 ~n",[]),
+    rabbit_channel:shutdown(Ch),
+
+    io:format("test_ttl t8 ~n",[]),
+
+    %% connect; get; close-connection
+    io:format("try msg 2 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 3 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 4 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 5 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 6 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 7 ~n"),
+    test_ttl_helper(QName),
+    io:format("try msg 8 ~n"),
+
+    %% delete queue 
+    %% rabbit_channel:do(Ch, #'queue.delete'{queue = QName}),
+    timer:sleep(1000),
+    rabbit_tests_event_receiver:stop(),
+    passed.
 
 test_statistics() ->
     application:set_env(rabbit, collect_statistics, fine),
